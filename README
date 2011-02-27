@@ -1,0 +1,14 @@
+php-fastcov
+-----------
+
+Current status: unstable
+
+Infos
+-----
+
+This extension extends the zend_tick_function to count the accesses
+to each line of a file.
+Current version is highly unstable, basic tests works on php 5.3.5.
+There are some unknown issues for now when using suhosin or the
+main ArchLinux package for exemple.
+
