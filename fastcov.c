@@ -50,14 +50,12 @@ ZEND_GET_MODULE(fastcov);
 ZEND_DLEXPORT void fc_ticks_function (int ticks) {
 	char *filename = zend_get_executed_filename();
 	long line = zend_get_executed_lineno();
-	//char *out = emalloc(strlen(filename) + sizeof(uint) + 1);
 
 	zval *rval;
 	zval **val = NULL;
 	if (!zend_hash_find(coverage_table->value.ht, filename, strlen(filename)+1, (void**) &val) == SUCCESS) {
 		zval *lval;
 		array_init_size(lval, 512);
-		//Z_ADDREF_P(lval);
 
 		zend_hash_add(coverage_table->value.ht, filename, strlen(filename)+1, &lval, sizeof(zval*), NULL);
 		rval = lval;
@@ -65,34 +63,18 @@ ZEND_DLEXPORT void fc_ticks_function (int ticks) {
 		rval = *val;
 	}
 
-	/*char *sline = emalloc(sizeof(long) + 1);
-	sprintf(sline, "%d", line);*/
-
-	//zval **zaline;
 	if (zend_hash_index_exists(rval->value.ht, line) == SUCCESS) {
 		zval *zline;
 		MAKE_STD_ZVAL(zline);
-		//ZVAL_LONG(zline, 0);
-		ZVAL_NULL(zline);
-		//Z_ADDREF_P(zline);
+		ZVAL_NULL(zline); // for now
 
 		zend_hash_index_update(rval->value.ht, line, &zline, sizeof(zval*), NULL);
-		//zend_hash_add_empty_element((*val)->value.ht, sline, strlen(sline)+1);
-		//zend_hash_add((*val)->value.ht, sline, strlen(sline)+1, &zline, sizeof(zval*), NULL);
-		//zend_hash_
-
-		//zval_ptr_dtor(&zline);
 	}
 
-	/*zval *entry;
-
-	ALLOC_ZVAL(entry);
-	*entry = *op;
-	INIT_PZVAL(entry);
-	php_sprintf(out, "%s:%d", filename, line);
-
-	zend_hash_next_index_insert(coverage_table, out, strlen(out), NULL);
-	//zend_hash_next_index_insert(coverage_table, "test", strlen("test")+1, NULL);*/
+	// send event to original tick function
+	if (_zend_ticks_function) {
+		_zend_ticks_function(ticks);
+	}
 }
 
 void fc_start() {
@@ -113,8 +95,6 @@ PHP_FUNCTION(fastcov_stop) {
 
 /**
  * Module init callback.
- *
- * @author cjiang
  */
 PHP_MINIT_FUNCTION(fastcov) {
 	ZVAL_LONG(&ticks_constant, 1);
@@ -142,11 +122,12 @@ PHP_RINIT_FUNCTION(fastcov) {
  * Request shutdown callback. Stop profiling and return.
  */
 PHP_RSHUTDOWN_FUNCTION(fastcov) {
-  return SUCCESS;
+	// TODO: clean coverage table
+	return SUCCESS;
 }
 
 /**
- * Module info callback. Returns the xhprof version.
+ * Module info callback. Returns the fastcov version.
  */
 PHP_MINFO_FUNCTION(fastcov)
 {
