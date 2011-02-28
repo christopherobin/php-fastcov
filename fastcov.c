@@ -13,7 +13,7 @@
 #include "ext/standard/info.h"
 #include "php_fastcov.h"
 
-#define FASTCOV_VERSION "0.1"
+#define FASTCOV_VERSION "0.2"
 
 static ZEND_DLEXPORT void (*_zend_ticks_function) (int ticks);
 static zend_op_array * (*_zend_compile_file) (zend_file_handle *file_handle,
@@ -124,25 +124,39 @@ PHP_FUNCTION(fastcov_start) {
 }
 
 PHP_FUNCTION(fastcov_stop) {
+	zval *file_coverage;
+
+	// initialise return array
+	array_init(return_value);
+	// retrieve first file
 	coverage_file *file = FASTCOV(first_file);
 	do {
-		php_printf("for file %s:\n", file->filename);
+		// initialise local array for returning lines
+		MAKE_STD_ZVAL(file_coverage);
+		array_init(file_coverage);
+
+		// then iterate on each line
 		uint i;
 		for (i = 0; i < file->line_count; i++) {
-			if (file->lines[i] > 0)
-				php_printf(" - line %d: %d calls\n", i, file->lines[i]);
+			if (file->lines[i] > 0) {
+				// if there were calls on this line, return it
+				add_index_long(file_coverage, i, file->lines[i]);
+			}
 		}
+
+		// then add line array to the main array using the filename as a key
+		add_assoc_zval(return_value, file->filename, file_coverage);
 	} while((file->next != NULL) && (file = file->next));
+
 }
 
 /**
  * Module init callback.
  */
 PHP_MINIT_FUNCTION(fastcov) {
+	// the tick global uses a zval as a value
 	ZVAL_LONG(&FASTCOV(ticks_constant), 1);
-	FASTCOV(first_file) = NULL;
-	FASTCOV(last_file) = NULL;
-	FASTCOV(current_file) = NULL;
+
 	return SUCCESS;
 }
 
@@ -159,6 +173,11 @@ PHP_MSHUTDOWN_FUNCTION(fastcov) {
 PHP_RINIT_FUNCTION(fastcov) {
 	// we need to setup ticks very soon in the script
 	CG(declarables).ticks = FASTCOV(ticks_constant);
+
+	// init our chained list items to NULL
+	FASTCOV(first_file) = NULL;
+	FASTCOV(last_file) = NULL;
+	FASTCOV(current_file) = NULL;
 
 	// then override the compile_file call to catch the file names and line count
 	_zend_compile_file = zend_compile_file;
