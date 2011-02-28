@@ -13,6 +13,8 @@
 #include "ext/standard/info.h"
 #include "php_fastcov.h"
 
+ZEND_DECLARE_MODULE_GLOBALS(fastcov);
+
 #define FASTCOV_VERSION "0.2"
 
 static ZEND_DLEXPORT void (*_zend_ticks_function) (int ticks);
@@ -44,8 +46,9 @@ zend_module_entry fastcov_module_entry = {
 	STANDARD_MODULE_PROPERTIES
 };
 
+#ifdef COMPILE_DL_FASTCOV
 ZEND_GET_MODULE(fastcov);
-ZEND_DECLARE_MODULE_GLOBALS(fastcov);
+#endif
 
 void fc_clean();
 
@@ -59,44 +62,48 @@ ZEND_DLEXPORT zend_op_array* fc_compile_file (zend_file_handle *file_handle,
 
 	// setup a basic coverage_file structure but do not allocate line counter
 	coverage_file *tmp = emalloc(sizeof(coverage_file));
-	tmp->filename = filename;
+	// we can't trust the pointer to our filename, duplicate it
+	tmp->filename = estrdup(filename);
 	tmp->lines = NULL;
 	tmp->allocated = 0;
 	tmp->line_count = line_count;
 	tmp->next = NULL;
 
 	// setup start of chained list if needed
-	if (FASTCOV(first_file) == NULL) {
-		FASTCOV(first_file) = tmp;
+	if (FASTCOV_GLOBALS(first_file) == NULL) {
+		FASTCOV_GLOBALS(first_file) = tmp;
 	}
 
 	// then update the last element
-	if (FASTCOV(last_file)) {
-		FASTCOV(last_file)->next = tmp;
+	if (FASTCOV_GLOBALS(last_file)) {
+		FASTCOV_GLOBALS(last_file)->next = tmp;
 	}
 
-	FASTCOV(last_file) = tmp;
+	FASTCOV_GLOBALS(last_file) = tmp;
 
 	return ret;
 }
 
 ZEND_DLEXPORT void fc_ticks_function (int ticks) {
-	char *filename = zend_get_executed_filename();
-	long line = zend_get_executed_lineno();
+	TSRMLS_FETCH();
+
+	char *filename = zend_get_executed_filename(TSRMLS_C);
+	long line = zend_get_executed_lineno(TSRMLS_C);
 
 	// if the current opcode is on a different file, switch the current_file variable
-	if (!FASTCOV(current_file) || FASTCOV(current_file)->filename != filename) {
-		coverage_file *file = FASTCOV(first_file);
-		do {
-			if (file->filename == filename) {
-				FASTCOV(current_file) = file;
+	if (!FASTCOV_GLOBALS(current_file) || (strcmp(FASTCOV_GLOBALS(current_file)->filename, filename) != 0)) {
+		coverage_file *file = FASTCOV_GLOBALS(first_file);
+		while (file != NULL) {
+			if (strcmp(file->filename, filename) == 0) {
+				FASTCOV_GLOBALS(current_file) = file;
 				break;
 			}
-		} while((file->next != NULL) && (file = file->next));
+			file = file->next;
+		}
 	}
 
-	if (FASTCOV(current_file) != NULL) {
-		coverage_file *current_file = FASTCOV(current_file);
+	if (FASTCOV_GLOBALS(current_file) != NULL) {
+		coverage_file *current_file = FASTCOV_GLOBALS(current_file);
 		// if the line count array wasn't allocated
 		if (!current_file->allocated) {
 			// alloc it
@@ -108,42 +115,44 @@ ZEND_DLEXPORT void fc_ticks_function (int ticks) {
 		// increment line counter
 		current_file->lines[line]++;
 	}
-
-	// send event to original tick function
-	if (_zend_ticks_function) {
-		_zend_ticks_function(ticks);
-	}
 }
 
-void fc_start() {
-	// replace the tick function by our function
-	_zend_ticks_function = zend_ticks_function;
-	zend_ticks_function = fc_ticks_function;
+void fc_start(TSRMLS_D) {
+	// add our tick function
+	php_add_tick_function(fc_ticks_function);
 }
 
-void fc_clean() {
-	if (FASTCOV(running) == 0) return;
-	FASTCOV(running) = 0;
-	if (zend_ticks_function == fc_ticks_function) {
-		zend_ticks_function = _zend_ticks_function;
-	}
+void fc_clean(TSRMLS_D) {
+	if (FASTCOV_GLOBALS(running) == 0) return;
+	FASTCOV_GLOBALS(running) = 0;
+}
+
+void fc_init(TSRMLS_D) {
+	// setup global variables
+	FASTCOV_GLOBALS(running) = 0;
+
+	// init our chained list items to NULL
+	FASTCOV_GLOBALS(first_file) = NULL;
+	FASTCOV_GLOBALS(last_file) = NULL;
+	FASTCOV_GLOBALS(current_file) = NULL;
 }
 
 PHP_FUNCTION(fastcov_start) {
-	FASTCOV(running) = 1;
-	fc_start();
+	// switch to running mode
+	FASTCOV_GLOBALS(running) = 1;
+	fc_start(TSRMLS_C);
 }
 
 PHP_FUNCTION(fastcov_stop) {
 	zval *file_coverage;
 
 	// stop covering
-	fc_clean();
+	fc_clean(TSRMLS_C);
 
 	// initialise return array
 	array_init(return_value);
 	// retrieve first file
-	coverage_file *file = FASTCOV(first_file);
+	coverage_file *file = FASTCOV_GLOBALS(first_file);
 	do {
 		// initialise local array for returning lines
 		MAKE_STD_ZVAL(file_coverage);
@@ -168,9 +177,9 @@ PHP_FUNCTION(fastcov_stop) {
  * Module init callback.
  */
 PHP_MINIT_FUNCTION(fastcov) {
-	// the tick global uses a zval as a value
-	ZVAL_LONG(&FASTCOV(ticks_constant), 1);
-
+#ifdef ZTS
+	ZEND_INIT_MODULE_GLOBALS(fastcov, NULL, NULL);
+#endif
 	return SUCCESS;
 }
 
@@ -185,22 +194,17 @@ PHP_MSHUTDOWN_FUNCTION(fastcov) {
  * Request init callback. Nothing to do yet!
  */
 PHP_RINIT_FUNCTION(fastcov) {
-	FASTCOV(running) = 0;
 	// we need to setup ticks very soon in the script
-	CG(declarables).ticks = FASTCOV(ticks_constant);
+	zval ticks;
+	ZVAL_LONG(&ticks, 1);
+	CG(declarables).ticks = ticks;
 
-	// init our chained list items to NULL
-	FASTCOV(first_file) = NULL;
-	FASTCOV(last_file) = NULL;
-	FASTCOV(current_file) = NULL;
+	fc_init(TSRMLS_C);
 
 	// then override the compile_file call to catch the file names and line count
 	_zend_compile_file = zend_compile_file;
 	zend_compile_file = fc_compile_file;
 	
-	// stop covering
-	fc_clean();
-
 	return SUCCESS;
 }
 
@@ -211,22 +215,21 @@ PHP_RSHUTDOWN_FUNCTION(fastcov) {
 	// restore initial compile callback
 	zend_compile_file = _zend_compile_file;
 
+	// stop covering
+	fc_clean(TSRMLS_C);
+
 	// free any used memory
-	coverage_file *file = FASTCOV(first_file);
+	coverage_file *file = FASTCOV_GLOBALS(first_file);
 	coverage_file *next;
 	do {
 		next = file->next;
+		efree(file->filename);
 		if (file->allocated) {
 			// free lines if allocated
 			efree(file->lines);
 		}
 		efree(file);
 	} while((next != NULL) && (file = next));
-
-	// reset those pointers
-	FASTCOV(first_file) = NULL;
-	FASTCOV(last_file) = NULL;
-	FASTCOV(current_file) = NULL;
 
 	return SUCCESS;
 }

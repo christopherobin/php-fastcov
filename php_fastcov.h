@@ -36,14 +36,13 @@ ZEND_BEGIN_MODULE_GLOBALS(fastcov)
     // the currently parsed file
     coverage_file *current_file;
     // ticks before we override them
-    zval ticks_constant;
     char running;
 ZEND_END_MODULE_GLOBALS(fastcov)
 
 #ifdef ZTS
-	#define FASTCOV(v) TSRMG(fastcov_globals_id, zend_fastcov_globals*, v)
+	#define FASTCOV_GLOBALS(v) TSRMG(fastcov_globals_id, zend_fastcov_globals*, v)
 #else
-	#define FASTCOV(v) (fastcov_globals.v)
+	#define FASTCOV_GLOBALS(v) (fastcov_globals.v)
 #endif
 
 PHP_MINIT_FUNCTION(fastcov);
