@@ -47,6 +47,8 @@ zend_module_entry fastcov_module_entry = {
 ZEND_GET_MODULE(fastcov);
 ZEND_DECLARE_MODULE_GLOBALS(fastcov);
 
+void fc_clean();
+
 ZEND_DLEXPORT zend_op_array* fc_compile_file (zend_file_handle *file_handle,
                                              int type TSRMLS_DC) {
 	// let the original compiler do it's work
@@ -119,12 +121,24 @@ void fc_start() {
 	zend_ticks_function = fc_ticks_function;
 }
 
+void fc_clean() {
+	if (FASTCOV(running) == 0) return;
+	FASTCOV(running) = 0;
+	if (zend_ticks_function == fc_ticks_function) {
+		zend_ticks_function = _zend_ticks_function;
+	}
+}
+
 PHP_FUNCTION(fastcov_start) {
+	FASTCOV(running) = 1;
 	fc_start();
 }
 
 PHP_FUNCTION(fastcov_stop) {
 	zval *file_coverage;
+
+	// stop covering
+	fc_clean();
 
 	// initialise return array
 	array_init(return_value);
@@ -171,6 +185,7 @@ PHP_MSHUTDOWN_FUNCTION(fastcov) {
  * Request init callback. Nothing to do yet!
  */
 PHP_RINIT_FUNCTION(fastcov) {
+	FASTCOV(running) = 0;
 	// we need to setup ticks very soon in the script
 	CG(declarables).ticks = FASTCOV(ticks_constant);
 
@@ -182,6 +197,9 @@ PHP_RINIT_FUNCTION(fastcov) {
 	// then override the compile_file call to catch the file names and line count
 	_zend_compile_file = zend_compile_file;
 	zend_compile_file = fc_compile_file;
+	
+	// stop covering
+	fc_clean();
 
 	return SUCCESS;
 }
@@ -190,6 +208,9 @@ PHP_RINIT_FUNCTION(fastcov) {
  * Request shutdown callback. Stop profiling and return.
  */
 PHP_RSHUTDOWN_FUNCTION(fastcov) {
+	// restore initial compile callback
+	zend_compile_file = _zend_compile_file;
+
 	// free any used memory
 	coverage_file *file = FASTCOV(first_file);
 	coverage_file *next;
@@ -201,7 +222,12 @@ PHP_RSHUTDOWN_FUNCTION(fastcov) {
 		}
 		efree(file);
 	} while((next != NULL) && (file = next));
-	// TODO: clean coverage table
+
+	// reset those pointers
+	FASTCOV(first_file) = NULL;
+	FASTCOV(last_file) = NULL;
+	FASTCOV(current_file) = NULL;
+
 	return SUCCESS;
 }
 

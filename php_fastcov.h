@@ -37,6 +37,7 @@ ZEND_BEGIN_MODULE_GLOBALS(fastcov)
     coverage_file *current_file;
     // ticks before we override them
     zval ticks_constant;
+    char running;
 ZEND_END_MODULE_GLOBALS(fastcov)
 
 #ifdef ZTS
