@@ -4,11 +4,26 @@ Author: Christophe Robin
 --FILE--
 <?php
 
-// 1: Sanity test a simple profile run
+function foo($var) {
+    $var = $var + 1;
+}
+
+$start = microtime(true);
+$i = 100000;
+while ($i--) {
+    foo($i);
+}
+var_dump(microtime(true) - $start);
+
+$start = microtime(true);
 fastcov_start();
-echo "foo";
-echo "bar\n";
+$i = 100000;
+while ($i--) {
+    foo($i);
+}
+var_dump(microtime(true) - $start);
 var_dump(fastcov_stop());
+
 
 --EXPECT--
 foobar
