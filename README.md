@@ -5,6 +5,17 @@ This extension provides precise code coverage on PHP applications with as little
 
 ### Current status: beta
 
+Configuration
+-------------
+
+Possible .ini values are:
+##### fastcov.auto_start On|Off [default: Off]
+Automatically starts the coverage, you may provide either an output dir in `fastcov.output_dir` or use `fastcov_stop()` yourself
+##### fastcov.auto_output On|Off [default: Off]
+Automatically output the coverage data in a file when stopping code coverage or when the script is finished, `On` is implied if `fastcov.auto_start` is enabled
+##### fastcov.output_dir "/path" [default: "/tmp"]
+Output directory for coverage files, php must have write permission in this directory
+
 Methods
 -------
 
@@ -12,8 +23,11 @@ Methods
 Starts the code coverage
 #### fastcov_running()
 Whether code coverage is running or not
-#### fastcov_stop()
-Stops the code coverage and return the result
+#### fastcov_stop([bool force_output = false [ , bool no_return = false])
+Stops the code coverage
+If `force_output` is set to true, it will write the coverage encoded in json in a file whose format
+is `fastcov-<random_sum>` where random_sum is a random md5sum; stored in the directory specified by the `fastcov.output_dir` ini directive ( by the "/tmp" folder ).
+If `no_return` is set, the function return null ( allows to save memory if force_output is already set to true ).
 
 Usage
 -----

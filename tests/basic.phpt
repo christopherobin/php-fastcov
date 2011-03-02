@@ -25,7 +25,7 @@ var_dump($fcoverage);
 foo
 foo
 array(1) {
-  ["test.php"]=>
+  ["basic.php"]=>
   array(5) {
     [3]=>
     int(1)

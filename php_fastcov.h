@@ -35,6 +35,8 @@ ZEND_BEGIN_MODULE_GLOBALS(fastcov)
 	coverage_file *current_file;
 	/* whether code coverage is running or not */
 	char running;
+	/* output directory */
+	char *output_dir;
 ZEND_END_MODULE_GLOBALS(fastcov)
 /* }}} */
 
