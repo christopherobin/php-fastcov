@@ -17,32 +17,36 @@ extern zend_module_entry fastcov_module_entry;
 #define PHP_FASTCOV_API
 #endif
 
-#ifdef ZTS
-#include "TSRM.h"
-#endif
-
+/* {{{ typedef struct _coverage_file */
 typedef struct _coverage_file {
 	char *filename;
-	uint *lines;
-    char allocated;
+	long *lines;
+	char allocated;
 	uint line_count;
 	struct _coverage_file *next;
 } coverage_file;
+/* }}} */
 
+/* {{{ ZEND_BEGIN_MODULE_GLOBALS */
 ZEND_BEGIN_MODULE_GLOBALS(fastcov)
-    // our file coverage chained list
-    coverage_file *first_file;
-    coverage_file *last_file;
-    // the currently parsed file
-    coverage_file *current_file;
-    // ticks before we override them
-    char running;
+	/* our file coverage chained list */
+	coverage_file *first_file;
+	coverage_file *last_file;
+	coverage_file *current_file;
+	/* whether code coverage is running or not */
+	char running;
 ZEND_END_MODULE_GLOBALS(fastcov)
+/* }}} */
+
+ZEND_EXTERN_MODULE_GLOBALS(fastcov)
 
 #ifdef ZTS
-	#define FASTCOV_GLOBALS(v) TSRMG(fastcov_globals_id, zend_fastcov_globals*, v)
+#	include "TSRM.h"
+#	define FASTCOV_G(v) TSRMG(fastcov_globals_id, zend_fastcov_globals *, v)
+#	define FASTCOV_GLOBALS ((zend_fastcov_globals *) (*((void ***) tsrm_ls))[TSRM_UNSHUFFLE_RSRC_ID(fastcov_globals_id)])
 #else
-	#define FASTCOV_GLOBALS(v) (fastcov_globals.v)
+#	define FASTCOV_G(v) (fastcov_globals.v)
+#	define FASTCOV_GLOBALS (&fastcov_globals)
 #endif
 
 PHP_MINIT_FUNCTION(fastcov);
@@ -52,6 +56,7 @@ PHP_RSHUTDOWN_FUNCTION(fastcov);
 PHP_MINFO_FUNCTION(fastcov);
 
 PHP_FUNCTION(fastcov_start);
+PHP_FUNCTION(fastcov_running);
 PHP_FUNCTION(fastcov_stop);
 
 #endif /* PHP_FASTCOV_H_ */

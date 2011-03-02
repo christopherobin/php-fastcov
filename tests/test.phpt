@@ -4,37 +4,38 @@ Author: Christophe Robin
 --FILE--
 <?php
 
-function foo($var) {
-    $var = $var + 1;
+fastcov_start(); // coverage is started from the following instruction
+
+function do_something() {
+    echo "foo\n";
 }
 
-$start = microtime(true);
-$i = 100000;
-while ($i--) {
-    foo($i);
+do_something();
+do_something();
+
+$coverage = fastcov_stop();
+
+// rebuild file path to make it relative
+$fcoverage = array();
+foreach ($coverage as $file => $lines) {
+    $fcoverage[basename($file)] = $lines;
 }
-var_dump(microtime(true) - $start);
-
-$start = microtime(true);
-fastcov_start();
-$i = 100000;
-while ($i--) {
-    foo($i);
-}
-var_dump(microtime(true) - $start);
-var_dump(fastcov_stop());
-
-
+var_dump($fcoverage);
 --EXPECT--
-foobar
+foo
+foo
 array(1) {
-  ["/home/crobin/Workspace/fastcov/tests/test.php"]=>
-  array(3) {
-    [4]=>
-    NULL
-    [5]=>
-    NULL
+  ["test.php"]=>
+  array(5) {
+    [3]=>
+    int(1)
     [6]=>
-    NULL
+    int(2)
+    [7]=>
+    int(1)
+    [9]=>
+    int(1)
+    [10]=>
+    int(1)
   }
 }
