@@ -33,7 +33,7 @@ Basic code coverage can be done using the following lines:
     11. 
     12. $coverage = fastcov_stop();
 
-Based on this samble, `$coverage` will contains the following array:
+Based on this sample, `$coverage` will contains the following array:
 
     array(
         "/path/to/myfile.php" => array(
