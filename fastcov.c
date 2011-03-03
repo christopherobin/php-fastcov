@@ -77,7 +77,9 @@ ZEND_GET_MODULE(fastcov);
 #endif
 
 /* {{{ prototypes */ 
+void fc_execute(zend_op_array *op_array TSRMLS_DC);
 void fc_ticks_function();
+void fc_check_context(char *filename TSRMLS_DC);
 int fc_start(TSRMLS_D);
 void fc_clean(zend_bool TSRMLS_DC);
 void fc_init(TSRMLS_D);
@@ -97,10 +99,15 @@ ZEND_DLEXPORT zend_op_array* fc_compile_file (zend_file_handle *file_handle, int
 	char *filename = ret->filename;
 	uint line_count = ret->opcodes[(ret->last - 1)].lineno;
 
+	/* left here for debugging purposes */
+	php_printf("<pre>compiled %s (lines: %d, op_array_ptr: %p, filename_ptr: %p)</pre>\n",
+		filename, line_count, ret, filename);
+
 	/* setup a basic coverage_file structure but do not allocate line counter */
 	coverage_file *tmp = emalloc(sizeof(coverage_file));
 	/* we can't trust the pointer to our filename, duplicate it */
 	tmp->filename = estrdup(filename);
+	tmp->filename_ptr = (intptr_t)filename;
 	tmp->lines = NULL;
 	tmp->allocated = 0;
 	tmp->line_count = line_count;
@@ -123,6 +130,62 @@ ZEND_DLEXPORT zend_op_array* fc_compile_file (zend_file_handle *file_handle, int
 }
 /* }}} */
 
+coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC) {
+	/* let the original compiler do it's work */
+	zend_op_array* ret = op_array;
+
+	char *filename = ret->filename;
+	uint line_count = ret->opcodes[(ret->last - 1)].lineno;
+
+	/* left here for debugging purposes */
+	php_printf("<pre>found %s (lines: %d, op_array_ptr: %p, filename_ptr: %p)</pre>\n",
+		filename, line_count, ret, filename);
+
+	/* setup a basic coverage_file structure but do not allocate line counter */
+	coverage_file *tmp = emalloc(sizeof(coverage_file));
+	/* we can't trust the pointer to our filename, duplicate it */
+	tmp->filename = estrdup(filename);
+	tmp->filename_ptr = (intptr_t)filename;
+	tmp->lines = NULL;
+	tmp->allocated = 0;
+	tmp->line_count = line_count;
+	tmp->next = NULL;
+
+	/* set the start of the chained list if needed */
+	if (FASTCOV_G(first_file) == NULL) {
+		FASTCOV_G(first_file) = tmp;
+	}
+
+	/* then update the previous element's pointer */
+	if (FASTCOV_G(last_file)) {
+		FASTCOV_G(last_file)->next = tmp;
+	}
+
+	/* finally replace it */
+	FASTCOV_G(last_file) = tmp;
+
+	return tmp;
+}
+
+void fc_check_context(char *filename TSRMLS_DC) {
+	intptr_t filename_ptr = (intptr_t)filename;
+	/* if the current opcode is on a different file than our current_filename_ptr pointer, switch to it */
+	if ((FASTCOV_G(current_filename_ptr) == 0) || (FASTCOV_G(current_filename_ptr) != filename_ptr)) {
+		coverage_file *file = FASTCOV_G(first_file);
+		while (file != NULL) {
+			if (file->filename_ptr == filename_ptr) {
+				/* left here for debugging purposes */
+				/*php_printf("<pre>Found file, switching to \"%s\" (op_array_ptr: %p, filename_ptr: %p, stored_filename_ptr: 0x%x)</pre>\n",
+					filename, EG(active_op_array), filename, file->filename_ptr);*/
+				FASTCOV_G(current_file) = file;
+				FASTCOV_G(current_filename_ptr) = filename_ptr;
+				break;
+			}
+			file = file->next;
+		}
+	}
+}
+
 /* {{{ fc_ticks_function() */
 void fc_ticks_function() {
 	TSRMLS_FETCH();
@@ -132,21 +195,10 @@ void fc_ticks_function() {
 		return;
 	}
 
-	/* retrieve the current opcode's filename and lineno */
-	char *filename = zend_get_executed_filename(TSRMLS_C);
-	ulong line = zend_get_executed_lineno(TSRMLS_C);
+	fc_check_context(zend_get_executed_filename(TSRMLS_C) TSRMLS_CC);
 
-	/* if the current opcode is on a different file than our current_file pointer, switch to it */
-	if ((FASTCOV_G(current_file) == NULL) || (strcmp(FASTCOV_G(current_file)->filename, filename) != 0)) {
-		coverage_file *file = FASTCOV_G(first_file);
-		while (file != NULL) {
-			if (strcmp(file->filename, filename) == 0) {
-				FASTCOV_G(current_file) = file;
-				break;
-			}
-			file = file->next;
-		}
-	}
+	/* retrieve the current opcode's filename and lineno */
+	ulong line = zend_get_executed_lineno(TSRMLS_C);
 
 	if (FASTCOV_G(current_file) != NULL) {
 		coverage_file *current_file = FASTCOV_G(current_file);
@@ -171,6 +223,7 @@ int fc_start(TSRMLS_D) {
 	}
 	/* switch to running mode */
 	FASTCOV_G(running) = 1;
+
 	/* register our tick function */
 	php_add_tick_function(fc_ticks_function);
 
@@ -186,6 +239,7 @@ void fc_clean(zend_bool force_output TSRMLS_DC) {
 
 	/* unregister tick function */
 	php_remove_tick_function(fc_ticks_function);
+
 	/* then remove running status */
 	FASTCOV_G(running) = 0;
 	
@@ -204,6 +258,8 @@ void fc_init(TSRMLS_D) {
 	FASTCOV_G(first_file) = NULL;
 	FASTCOV_G(last_file) = NULL;
 	FASTCOV_G(current_file) = NULL;
+	
+	FASTCOV_G(current_filename_ptr) = 0;
 }
 /* }}} */
 
@@ -360,9 +416,6 @@ PHP_MINIT_FUNCTION(fastcov) {
 #ifdef ZTS
 	ZEND_INIT_MODULE_GLOBALS(fastcov, NULL, NULL);
 #endif
-	/* then override the compile_file call to catch the file names and line count */
-	fc_orig_compile_file = zend_compile_file;
-	zend_compile_file = fc_compile_file;
 	
 	REGISTER_INI_ENTRIES();
 
@@ -372,11 +425,6 @@ PHP_MINIT_FUNCTION(fastcov) {
 
 /* {{{ PHP_MSHUTDOWN_FUNCTION */
 PHP_MSHUTDOWN_FUNCTION(fastcov) {
-	/* restore initial compile callback */
-	if (zend_compile_file == fc_compile_file) {
-		zend_compile_file = fc_orig_compile_file;
-	}
-
 	return SUCCESS;
 }
 /* }}} */
@@ -388,10 +436,15 @@ PHP_RINIT_FUNCTION(fastcov) {
 	ZVAL_LONG(&ticks, 1);
 	CG(declarables).ticks = ticks;
 
+	/* then override the compile_file call to catch the file names and line count */
+	fc_orig_compile_file = zend_compile_file;
+	zend_compile_file = fc_compile_file;
+
 	fc_init(TSRMLS_C);
 
 	/* starts the code coverage if enabled in the ini file */
 	if (INI_BOOL("fastcov.auto_start") == 1) {
+		php_printf("STARTING COVERAGE YAAAAAAARRRRR !!!!\n");
 		fc_start(TSRMLS_C);
 	}
 
@@ -415,6 +468,12 @@ PHP_RSHUTDOWN_FUNCTION(fastcov) {
 			efree(tmp->lines);
 		}
 		efree(tmp);
+	}
+
+	/* restore initial compile callback */
+	if (zend_compile_file == fc_compile_file) {
+		//php_printf("removing compile file hook");
+		zend_compile_file = fc_orig_compile_file;
 	}
 
 	return SUCCESS;

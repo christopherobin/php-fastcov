@@ -20,6 +20,7 @@ extern zend_module_entry fastcov_module_entry;
 /* {{{ typedef struct _coverage_file */
 typedef struct _coverage_file {
 	char *filename;
+	intptr_t filename_ptr;
 	long *lines;
 	char allocated;
 	uint line_count;
@@ -33,6 +34,7 @@ ZEND_BEGIN_MODULE_GLOBALS(fastcov)
 	coverage_file *first_file;
 	coverage_file *last_file;
 	coverage_file *current_file;
+	intptr_t current_filename_ptr;
 	/* whether code coverage is running or not */
 	char running;
 	/* output directory */
