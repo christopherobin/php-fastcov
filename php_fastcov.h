@@ -35,8 +35,10 @@ ZEND_BEGIN_MODULE_GLOBALS(fastcov)
 	coverage_file *last_file;
 	coverage_file *current_file;
 	intptr_t current_filename_ptr;
+	/* whether we must run in high compatibility mode or not */
+	int high_compatibility;
 	/* whether code coverage is running or not */
-	char running;
+	int running;
 	/* output directory */
 	char *output_dir;
 ZEND_END_MODULE_GLOBALS(fastcov)

@@ -86,50 +86,6 @@ void fc_init(TSRMLS_D);
 void fc_output(TSRMLS_D);
 /* }}} */
 
-/* pointer to the original PHP compile_file */
-zend_op_array *(*fc_orig_compile_file) (zend_file_handle *file_handle, int type TSRMLS_DC);
-
-/* we override compile_file to sniff compiled files and prebuild our coverage structures */
-/* {{{ fc_compile_file() */
-ZEND_DLEXPORT zend_op_array* fc_compile_file (zend_file_handle *file_handle, int type TSRMLS_DC) {
-
-	/* let the original compiler do it's work */
-	zend_op_array* ret = fc_orig_compile_file(file_handle, type TSRMLS_CC);
-
-	char *filename = ret->filename;
-	uint line_count = ret->opcodes[(ret->last - 1)].lineno;
-
-	/* left here for debugging purposes */
-	php_printf("<pre>compiled %s (lines: %d, op_array_ptr: %p, filename_ptr: %p)</pre>\n",
-		filename, line_count, ret, filename);
-
-	/* setup a basic coverage_file structure but do not allocate line counter */
-	coverage_file *tmp = emalloc(sizeof(coverage_file));
-	/* we can't trust the pointer to our filename, duplicate it */
-	tmp->filename = estrdup(filename);
-	tmp->filename_ptr = (intptr_t)filename;
-	tmp->lines = NULL;
-	tmp->allocated = 0;
-	tmp->line_count = line_count;
-	tmp->next = NULL;
-
-	/* set the start of the chained list if needed */
-	if (FASTCOV_G(first_file) == NULL) {
-		FASTCOV_G(first_file) = tmp;
-	}
-
-	/* then update the previous element's pointer */
-	if (FASTCOV_G(last_file)) {
-		FASTCOV_G(last_file)->next = tmp;
-	}
-
-	/* finally replace it */
-	FASTCOV_G(last_file) = tmp;
-
-	return ret;
-}
-/* }}} */
-
 coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC) {
 	/* let the original compiler do it's work */
 	zend_op_array* ret = op_array;
@@ -138,8 +94,8 @@ coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC) {
 	uint line_count = ret->opcodes[(ret->last - 1)].lineno;
 
 	/* left here for debugging purposes */
-	php_printf("<pre>found %s (lines: %d, op_array_ptr: %p, filename_ptr: %p)</pre>\n",
-		filename, line_count, ret, filename);
+	/*php_printf("<pre>Registering %s (lines: %d, op_array_ptr: %p, filename_ptr: %p)</pre>\n",
+		filename, line_count, ret, filename);*/
 
 	/* setup a basic coverage_file structure but do not allocate line counter */
 	coverage_file *tmp = emalloc(sizeof(coverage_file));
@@ -169,20 +125,35 @@ coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC) {
 
 void fc_check_context(char *filename TSRMLS_DC) {
 	intptr_t filename_ptr = (intptr_t)filename;
-	/* if the current opcode is on a different file than our current_filename_ptr pointer, switch to it */
+	/* if the current opcode is on a different file than our current_filename_ptr pointer, switch to it.
+	/* we don't use strcmp there in high_compatibility as it would reduce performances on large section of
+	 * procedural code where the op_array stay the same */
 	if ((FASTCOV_G(current_filename_ptr) == 0) || (FASTCOV_G(current_filename_ptr) != filename_ptr)) {
 		coverage_file *file = FASTCOV_G(first_file);
+		int found = 0;
 		while (file != NULL) {
-			if (file->filename_ptr == filename_ptr) {
-				/* left here for debugging purposes */
-				/*php_printf("<pre>Found file, switching to \"%s\" (op_array_ptr: %p, filename_ptr: %p, stored_filename_ptr: 0x%x)</pre>\n",
-					filename, EG(active_op_array), filename, file->filename_ptr);*/
-				FASTCOV_G(current_file) = file;
-				FASTCOV_G(current_filename_ptr) = filename_ptr;
-				break;
+			/* if filename pointers could be wrong, switch back to strcmp */
+			if (FASTCOV_G(high_compatibility) == 1) {
+				if (strcmp(file->filename, filename) == 0) {
+					FASTCOV_G(current_file) = file;
+					found = 1;
+					break;
+				}
+			} else {
+				if (file->filename_ptr == filename_ptr) {
+					FASTCOV_G(current_file) = file;
+					found = 1;
+					break;
+				}
 			}
 			file = file->next;
 		}
+		/* file not found, register it */
+		if (found == 0) {
+			FASTCOV_G(current_file) = fc_register_file(EG(active_op_array));
+		}
+		/* then store pointer to current file */
+		FASTCOV_G(current_filename_ptr) = filename_ptr;
 	}
 }
 
@@ -416,7 +387,16 @@ PHP_MINIT_FUNCTION(fastcov) {
 #ifdef ZTS
 	ZEND_INIT_MODULE_GLOBALS(fastcov, NULL, NULL);
 #endif
-	
+
+	FASTCOV_G(high_compatibility) = 0;
+	/* when apc loads opcode_arrays from cache, it uses one filename pointer per
+	 * opcode array, preventing us to use this pointer to find files, we must then
+	 * switch to high_compatibility mode and use strcmp for filename comparisons,
+	 * making us actually slower */
+	if (zend_hash_exists(&module_registry, "apc", sizeof("apc"))) {
+		FASTCOV_G(high_compatibility) = 1;
+	}
+
 	REGISTER_INI_ENTRIES();
 
 	return SUCCESS;
@@ -436,15 +416,10 @@ PHP_RINIT_FUNCTION(fastcov) {
 	ZVAL_LONG(&ticks, 1);
 	CG(declarables).ticks = ticks;
 
-	/* then override the compile_file call to catch the file names and line count */
-	fc_orig_compile_file = zend_compile_file;
-	zend_compile_file = fc_compile_file;
-
 	fc_init(TSRMLS_C);
 
 	/* starts the code coverage if enabled in the ini file */
 	if (INI_BOOL("fastcov.auto_start") == 1) {
-		php_printf("STARTING COVERAGE YAAAAAAARRRRR !!!!\n");
 		fc_start(TSRMLS_C);
 	}
 
@@ -468,12 +443,6 @@ PHP_RSHUTDOWN_FUNCTION(fastcov) {
 			efree(tmp->lines);
 		}
 		efree(tmp);
-	}
-
-	/* restore initial compile callback */
-	if (zend_compile_file == fc_compile_file) {
-		//php_printf("removing compile file hook");
-		zend_compile_file = fc_orig_compile_file;
 	}
 
 	return SUCCESS;

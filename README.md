@@ -5,6 +5,12 @@ This extension provides precise code coverage on PHP applications with as little
 
 ### Current status: beta
 
+Notes
+-----
+
+Opcode caching extensions may cause issues with the way this extension work. I made sure to be compatible with at least `APC` for the moment, but at the cost of coverage performance (_even though it should stay at a tolerable level_).
+If you see that code coverage files are not the same size before the opcode is cached and after, then your current opcode caching extension may not be compatible. If that's the case, please post details there: BombStrike/php-fastcov#1
+
 Configuration
 -------------
 
