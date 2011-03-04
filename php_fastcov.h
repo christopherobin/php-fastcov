@@ -18,25 +18,30 @@ extern zend_module_entry fastcov_module_entry;
 #endif
 
 /* {{{ typedef struct _coverage_file */
-typedef struct _coverage_file {
+typedef struct _fastcov_coverage_file {
 	char *filename;
 	intptr_t filename_ptr;
 	long *lines;
 	char allocated;
 	uint line_count;
 	struct _coverage_file *next;
-} coverage_file;
+} fastcov_coverage_file;
+/* }}} */
+
+/* {{{ typedef struct _fastcov_output
+ * this small structure allow us to know which file we're printing for the json format */
+typedef struct _fastcov_output {
+	FILE *fd;
+	int first_file;
+} fastcov_output;
 /* }}} */
 
 /* {{{ ZEND_BEGIN_MODULE_GLOBALS */
 ZEND_BEGIN_MODULE_GLOBALS(fastcov)
 	/* our file coverage chained list */
-	coverage_file *first_file;
-	coverage_file *last_file;
-	coverage_file *current_file;
+	fastcov_coverage_file *current_file;
+	HashTable covered_files;
 	intptr_t current_filename_ptr;
-	/* whether we must run in high compatibility mode or not */
-	int high_compatibility;
 	/* whether code coverage is running or not */
 	int running;
 	/* output directory */

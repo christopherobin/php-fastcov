@@ -35,4 +35,4 @@ var_dump(str_replace($odir, '', $coverage));
 --EXPECT--
 foo
 foo
-string(61) "{"/output.php":{"3":1,"4":1,"5":1,"8":2,"9":1,"11":1,"12":1}}"
+string(49) "{"/output.php":{"5":1,"8":2,"9":1,"11":1,"12":1}}"

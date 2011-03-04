@@ -15,7 +15,7 @@
 #include "ext/standard/md5.h"
 #include "php_fastcov.h"
 
-#define FASTCOV_VERSION "0.4"
+#define FASTCOV_VERSION "0.5"
 
 /* {{{ fastcov_functions[]
  */
@@ -77,7 +77,8 @@ ZEND_GET_MODULE(fastcov);
 #endif
 
 /* {{{ prototypes */ 
-void fc_execute(zend_op_array *op_array TSRMLS_DC);
+fastcov_coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC);
+int fc_free_allocated_lines(void *item);
 void fc_ticks_function();
 void fc_check_context(char *filename TSRMLS_DC);
 int fc_start(TSRMLS_D);
@@ -86,76 +87,87 @@ void fc_init(TSRMLS_D);
 void fc_output(TSRMLS_D);
 /* }}} */
 
-coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC) {
+/* {{{ fc_register_file() */
+fastcov_coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC) {
 	/* let the original compiler do it's work */
 	zend_op_array* ret = op_array;
 
 	char *filename = ret->filename;
 	uint line_count = ret->opcodes[(ret->last - 1)].lineno;
 
-	/* left here for debugging purposes */
-	/*php_printf("<pre>Registering %s (lines: %d, op_array_ptr: %p, filename_ptr: %p)</pre>\n",
-		filename, line_count, ret, filename);*/
-
 	/* setup a basic coverage_file structure but do not allocate line counter */
-	coverage_file *tmp = emalloc(sizeof(coverage_file));
+	fastcov_coverage_file tmp, *res;
 	/* we can't trust the pointer to our filename, duplicate it */
-	tmp->filename = estrdup(filename);
-	tmp->filename_ptr = (intptr_t)filename;
-	tmp->lines = NULL;
-	tmp->allocated = 0;
-	tmp->line_count = line_count;
-	tmp->next = NULL;
+	tmp.filename = estrdup(filename);
+	tmp.filename_ptr = (intptr_t)filename;
+	tmp.lines = NULL;
+	tmp.allocated = 0;
+	tmp.line_count = line_count;
+	tmp.next = NULL;
 
-	/* set the start of the chained list if needed */
-	if (FASTCOV_G(first_file) == NULL) {
-		FASTCOV_G(first_file) = tmp;
-	}
+	zend_hash_add(&FASTCOV_G(covered_files), filename, strlen(filename), &tmp, sizeof(fastcov_coverage_file), (void**)&res);
 
-	/* then update the previous element's pointer */
-	if (FASTCOV_G(last_file)) {
-		FASTCOV_G(last_file)->next = tmp;
-	}
-
-	/* finally replace it */
-	FASTCOV_G(last_file) = tmp;
-
-	return tmp;
+	return res;
 }
+/* }}} */
 
+/* {{{ fc_free_allocated_lines() */
+int fc_free_allocated_lines(void *item) {
+	fastcov_coverage_file *file = (fastcov_coverage_file*)item;
+
+	if (file->allocated == 1) {
+		efree(file->lines);
+	}
+
+	return ZEND_HASH_APPLY_KEEP;
+}
+/* }}} */
+
+/* {{{ fc_build_array_element() */
+int fc_build_array_element(void *item, void *return_value_ptr) {
+	zval *file_coverage;
+	zval *return_value = (zval*)return_value_ptr;
+	fastcov_coverage_file *file = (fastcov_coverage_file*)item;
+
+	/* initialise local array for returning lines */
+	MAKE_STD_ZVAL(file_coverage);
+	array_init(file_coverage);
+
+	/* check if the file was called even once */
+	if (file->allocated == 1) {
+		/* then iterate on each line */
+		ulong line;
+		for (line = 0; line < file->line_count; line++) {
+			if (file->lines[line] > 0) {
+				/* if there were calls on this line, return it */
+				add_index_long(file_coverage, line, file->lines[line]);
+			}
+		}
+	}
+
+	/* then add line array to the main array using the filename as a key */
+	add_assoc_zval(return_value, file->filename, file_coverage);
+}
+/* }}} */
+
+/* {{{ fc_check_context() */
 void fc_check_context(char *filename TSRMLS_DC) {
 	intptr_t filename_ptr = (intptr_t)filename;
 	/* if the current opcode is on a different file than our current_filename_ptr pointer, switch to it.
 	/* we don't use strcmp there in high_compatibility as it would reduce performances on large section of
 	 * procedural code where the op_array stay the same */
 	if ((FASTCOV_G(current_filename_ptr) == 0) || (FASTCOV_G(current_filename_ptr) != filename_ptr)) {
-		coverage_file *file = FASTCOV_G(first_file);
-		int found = 0;
-		while (file != NULL) {
-			/* if filename pointers could be wrong, switch back to strcmp */
-			if (FASTCOV_G(high_compatibility) == 1) {
-				if (strcmp(file->filename, filename) == 0) {
-					FASTCOV_G(current_file) = file;
-					found = 1;
-					break;
-				}
-			} else {
-				if (file->filename_ptr == filename_ptr) {
-					FASTCOV_G(current_file) = file;
-					found = 1;
-					break;
-				}
-			}
-			file = file->next;
-		}
-		/* file not found, register it */
-		if (found == 0) {
+		fastcov_coverage_file *file;
+		if (zend_hash_find(&FASTCOV_G(covered_files), filename, strlen(filename), (void**)&file) == SUCCESS) {
+			FASTCOV_G(current_file) = file;
+		} else {
 			FASTCOV_G(current_file) = fc_register_file(EG(active_op_array));
 		}
 		/* then store pointer to current file */
 		FASTCOV_G(current_filename_ptr) = filename_ptr;
 	}
 }
+/* }}} */
 
 /* {{{ fc_ticks_function() */
 void fc_ticks_function() {
@@ -172,7 +184,7 @@ void fc_ticks_function() {
 	ulong line = zend_get_executed_lineno(TSRMLS_C);
 
 	if (FASTCOV_G(current_file) != NULL) {
-		coverage_file *current_file = FASTCOV_G(current_file);
+		fastcov_coverage_file *current_file = FASTCOV_G(current_file);
 		/* if the line count array wasn't allocated */
 		if (current_file->allocated == 0) {
 			/* alloc it */
@@ -198,6 +210,9 @@ int fc_start(TSRMLS_D) {
 	/* register our tick function */
 	php_add_tick_function(fc_ticks_function);
 
+	/* init our file array */
+	zend_hash_init(&FASTCOV_G(covered_files), 5, NULL, NULL, 0);
+
 	return 1;
 }
 /* }}} */
@@ -213,10 +228,16 @@ void fc_clean(zend_bool force_output TSRMLS_DC) {
 
 	/* then remove running status */
 	FASTCOV_G(running) = 0;
-	
+
 	if (force_output || (INI_BOOL("fastcov.auto_start") == 1) || (INI_BOOL("fastcov.auto_output") == 1)) {
 		fc_output(TSRMLS_C);
 	}
+
+	/* free any used memory */
+	zend_hash_apply(&FASTCOV_G(covered_files), fc_free_allocated_lines);
+
+	/* destroy hash */
+	zend_hash_destroy(&FASTCOV_G(covered_files));
 }
 /* }}} */
 
@@ -225,14 +246,41 @@ void fc_init(TSRMLS_D) {
 	/* setup global variables */
 	FASTCOV_G(running) = 0;
 
-	/* init our chained list items */
-	FASTCOV_G(first_file) = NULL;
-	FASTCOV_G(last_file) = NULL;
-	FASTCOV_G(current_file) = NULL;
-	
 	FASTCOV_G(current_filename_ptr) = 0;
 }
 /* }}} */
+
+
+int fc_print_file(void *item, void *arg TSRMLS_DC) {
+	fastcov_output *output = (fastcov_output*)arg;
+	fastcov_coverage_file *file = (fastcov_coverage_file*)item;
+
+	/* print file names */
+	if (!output->first_file) {
+		fputc(',', output->fd);
+	}
+	fprintf(output->fd, "\"%s\":{", file->filename);
+
+	/* print lines */
+	if (file->allocated == 1) {
+		int line, first_line = 1;
+		for (line = 0; line < file->line_count; line++) {
+			if (file->lines[line] > 0) {
+				// print a comma starting from second item
+				if (!first_line) {
+					fputc(',', output->fd);
+				}
+				fprintf(output->fd, "\"%d\":%d", line, file->lines[line]);
+				first_line = 0;
+			}
+		}
+	}
+
+	fputc('}', output->fd);
+	output->first_file = 0;
+
+	return ZEND_HASH_APPLY_KEEP;
+}
 
 /* {{{ fc_output() */
 void fc_output(TSRMLS_D) {
@@ -267,47 +315,16 @@ void fc_output(TSRMLS_D) {
 	php_sprintf(output_filename, "%s/fastcov-%s", output_dir, md5str);
 	/*php_printf("filename: %s\n", output_filename);*/
 
-	FILE *output_file = fopen(output_filename, "w");
-	if (output_file) {
+	fastcov_output output = { NULL, 1 };
+	output.fd = fopen(output_filename, "w");
+	if (output.fd) {
 		/* generate a json file for output */
-		fputc('{', output_file);
-		/* retrieve first file */
-		coverage_file *file = FASTCOV_G(first_file);
-		int file_no = 0;
-		while (file != NULL) {
-			/* add commas between each files */
-			if (file_no > 0) {
-				fputc(',', output_file);
-			}
-			/* write the filename and open the line count array */
-			fprintf(output_file, "\"%s\":{", file->filename);
-			
-			/* check if the file was called even once */
-			if (file->allocated == 1) {
-				/* then iterate on each line */
-				ulong i;
-				int line_no = 0;
-				for (i = 0; i < file->line_count; i++) {
-					if (file->lines[i] > 0) {
-						/* add comma between each lines */
-						if (line_no) {
-							fputc(',', output_file);
-						}
-						/* and output the line number */
-						fprintf(output_file, "\"%d\":%d", i, file->lines[i]);
-						line_no++;
-					}
-				}
-			}
-
-			/* close the line count array */
-			fputc('}', output_file);
-			file_no++;
-			file = file->next;
-		}
+		fputc('{', output.fd);
+		/* apply function for writing */
+		zend_hash_apply_with_argument(&FASTCOV_G(covered_files), fc_print_file, (void*)&output);
 		/* then close the whole json block */
-		fputc('}', output_file);
-		fclose(output_file);
+		fputc('}', output.fd);
+		fclose(output.fd);
 	} else {
 		/* output an error */
 		php_error(E_NOTICE, "Couldn't open code coverage output file %s", output_filename);
@@ -343,42 +360,21 @@ PHP_FUNCTION(fastcov_stop) {
 	zval *file_coverage;
 	zend_bool force_output = 0;
 	zend_bool no_return = 0;
-	
+
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|bb", &force_output, &no_return) == FAILURE) {
 		RETURN_FALSE;
 	}
-
-	/* stop covering */
-	fc_clean(force_output TSRMLS_CC);
 
 	if (no_return == 0) {
 		/* initialise return array */
 		array_init(return_value);
 
-		/* retrieve first file */
-		coverage_file *file = FASTCOV_G(first_file);
-		while (file != NULL) {
-			/* initialise local array for returning lines */
-			MAKE_STD_ZVAL(file_coverage);
-			array_init(file_coverage);
-
-			/* check if the file was called even once */
-			if (file->allocated == 1) {
-				/* then iterate on each line */
-				ulong i;
-				for (i = 0; i < file->line_count; i++) {
-					if (file->lines[i] > 0) {
-						/* if there were calls on this line, return it */
-						add_index_long(file_coverage, i, file->lines[i]);
-					}
-				}
-			}
-
-			/* then add line array to the main array using the filename as a key */
-			add_assoc_zval(return_value, file->filename, file_coverage);
-			file = file->next;
-		}
+		/* build our array */
+		zend_hash_apply_with_argument(&FASTCOV_G(covered_files), fc_build_array_element, (void*)return_value);
 	}
+
+	/* stop covering */
+	fc_clean(force_output TSRMLS_CC);
 }
 /* }}} */
 
@@ -387,15 +383,6 @@ PHP_MINIT_FUNCTION(fastcov) {
 #ifdef ZTS
 	ZEND_INIT_MODULE_GLOBALS(fastcov, NULL, NULL);
 #endif
-
-	FASTCOV_G(high_compatibility) = 0;
-	/* when apc loads opcode_arrays from cache, it uses one filename pointer per
-	 * opcode array, preventing us to use this pointer to find files, we must then
-	 * switch to high_compatibility mode and use strcmp for filename comparisons,
-	 * making us actually slower */
-	if (zend_hash_exists(&module_registry, "apc", sizeof("apc"))) {
-		FASTCOV_G(high_compatibility) = 1;
-	}
 
 	REGISTER_INI_ENTRIES();
 
@@ -416,6 +403,7 @@ PHP_RINIT_FUNCTION(fastcov) {
 	ZVAL_LONG(&ticks, 1);
 	CG(declarables).ticks = ticks;
 
+	/* setup memory */
 	fc_init(TSRMLS_C);
 
 	/* starts the code coverage if enabled in the ini file */
@@ -431,19 +419,6 @@ PHP_RINIT_FUNCTION(fastcov) {
 PHP_RSHUTDOWN_FUNCTION(fastcov) {
 	/* stop covering */
 	fc_clean(0 TSRMLS_CC);
-
-	/* free any used memory */
-	coverage_file *file = FASTCOV_G(first_file);
-	while (file != NULL) {
-		coverage_file *tmp = file;
-		file = tmp->next;
-		
-		efree(tmp->filename);
-		if (tmp->allocated) {
-			efree(tmp->lines);
-		}
-		efree(tmp);
-	}
 
 	return SUCCESS;
 }
