@@ -14,6 +14,7 @@
 #include "main/php_ticks.h"
 #include "ext/standard/info.h"
 #include "ext/standard/md5.h"
+#include "ext/standard/php_lcg.h"
 #include "php_fastcov.h"
 #include "zend_config.w32.h"
 
@@ -151,6 +152,7 @@ int fc_build_array_element(void *item, void *return_value_ptr TSRMLS_DC) {
 
 	/* then add line array to the main array using the filename as a key */
 	add_assoc_zval(return_value, file->filename, file_coverage);
+	return 0;
 }
 /* }}} */
 
@@ -385,7 +387,6 @@ PHP_FUNCTION(fastcov_running) {
    from returning data ( useful to save memory when force_output is enabled ), in this case the function will
    return NULL */
 PHP_FUNCTION(fastcov_stop) {
-	zval *file_coverage;
 	zend_bool force_output = 0;
 	zend_bool no_return = 0;
 
