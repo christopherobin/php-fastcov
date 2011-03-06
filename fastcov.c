@@ -292,7 +292,7 @@ int fc_print_file(void *item, void *arg TSRMLS_DC) {
 
 	/* print lines */
 	if (file->allocated == 1) {
-		int line, first_line = 1;
+		unsigned int line, first_line = 1;
 		for (line = 0; line < file->line_count; line++) {
 			if (file->lines[line] > 0) {
 				// print a comma starting from second item
