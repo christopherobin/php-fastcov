@@ -39,6 +39,7 @@ Last 5 commits:
    <dir name="tests">
     <file name="basic.phpt" role="test" />
     <file name="output.phpt" role="test" />
+    <file name="realloc.phpt" role="test" />
    </dir> <!-- //tests -->
    <file name="config.m4" role="src" />
    <file name="config.w32" role="src" />

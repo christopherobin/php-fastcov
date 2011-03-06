@@ -195,6 +195,27 @@ void fc_ticks_function() {
 			memset(current_file->lines, 0, sizeof(long) * (current_file->line_count + 1));
 			current_file->allocated = 1;
 		}
+		/* there are cases where the last opcode of the active array may not be the file end,
+		 * for now, update the array size ( slow )
+		 * TODO: find a fast and reliable way to count the lines a file without opening it */
+		if (line > current_file->line_count) {
+			/* redetect data from op_array */
+			zend_op_array *active = EG(active_op_array);
+			uint line_count = active->opcodes[(active->last - 1)].lineno;
+			/* if the op array still doesn't return any useful value */
+			if (line_count <= current_file->line_count) {
+				/* fallback to the current line */
+				line_count = line;
+			}
+			uint previous_count = current_file->line_count; /* used to zero new values */
+			/* update file object and reallocate memory, should be fast as those arrays are pretty small */
+			current_file->line_count = line_count;
+			current_file->lines = erealloc(current_file->lines, sizeof(long) * (current_file->line_count + 1));
+			/* amount of new lines inserted */
+			uint diff = line_count - previous_count;
+			/* only zero new values */
+			memset(current_file->lines + previous_count + 1, 0, sizeof(long) * diff);
+		}
 		/* increment line counter */
 		current_file->lines[line]++;
 	}
