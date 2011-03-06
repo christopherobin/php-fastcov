@@ -11,9 +11,11 @@
 
 #include "php.h"
 #include "php_ini.h"
+#include "main/php_ticks.h"
 #include "ext/standard/info.h"
 #include "ext/standard/md5.h"
 #include "php_fastcov.h"
+#include "zend_config.w32.h"
 
 #define FASTCOV_VERSION "0.9.0"
 
@@ -173,6 +175,7 @@ void fc_check_context(char *filename TSRMLS_DC) {
 
 /* {{{ fc_ticks_function() */
 void fc_ticks_function() {
+	uint line;
 	TSRMLS_FETCH();
 
 	/* ignore the ticks if we are not running the coverage ( shoudln't happens ) */
@@ -183,7 +186,7 @@ void fc_ticks_function() {
 	fc_check_context(zend_get_executed_filename(TSRMLS_C) TSRMLS_CC);
 
 	/* retrieve the current opcode's filename and lineno */
-	ulong line = zend_get_executed_lineno(TSRMLS_C);
+	line = zend_get_executed_lineno(TSRMLS_C);
 
 	if (FASTCOV_G(current_file) != NULL) {
 		fastcov_coverage_file *current_file = FASTCOV_G(current_file);
@@ -199,6 +202,7 @@ void fc_ticks_function() {
 		 * for now, update the array size ( slow )
 		 * TODO: find a fast and reliable way to count the lines a file without opening it */
 		if (line > current_file->line_count) {
+			uint previous_count, diff;
 			/* redetect data from op_array */
 			zend_op_array *active = EG(active_op_array);
 			uint line_count = active->opcodes[(active->last - 1)].lineno;
@@ -207,12 +211,12 @@ void fc_ticks_function() {
 				/* fallback to the current line */
 				line_count = line;
 			}
-			uint previous_count = current_file->line_count; /* used to zero new values */
+			previous_count = current_file->line_count; /* used to zero new values */
 			/* update file object and reallocate memory, should be fast as those arrays are pretty small */
 			current_file->line_count = line_count;
 			current_file->lines = erealloc(current_file->lines, sizeof(long) * (current_file->line_count + 1));
 			/* amount of new lines inserted */
-			uint diff = line_count - previous_count;
+			diff = line_count - previous_count;
 			/* only zero new values */
 			memset(current_file->lines + previous_count + 1, 0, sizeof(long) * diff);
 		}
@@ -307,10 +311,6 @@ int fc_print_file(void *item, void *arg TSRMLS_DC) {
 
 /* {{{ fc_output() */
 void fc_output(TSRMLS_D) {
-	if (strlen(FASTCOV_G(output_dir)) == 0) {
-		/* output dir is empty */
-		return;
-	}
 	/* build the output filename */
 	char *output_dir, *output_filename;
 	int len;
@@ -318,6 +318,12 @@ void fc_output(TSRMLS_D) {
 	unsigned char digest[16];
 	char md5str[33];
 	char random_number[10];
+	fastcov_output output = { NULL, 1 };
+
+	if (strlen(FASTCOV_G(output_dir)) == 0) {
+		/* output dir is empty */
+		return;
+	}
 
 	/* cache output dir */
 	output_dir = FASTCOV_G(output_dir);
@@ -338,7 +344,6 @@ void fc_output(TSRMLS_D) {
 	php_sprintf(output_filename, "%s/fastcov-%s", output_dir, md5str);
 	/*php_printf("filename: %s\n", output_filename);*/
 
-	fastcov_output output = { NULL, 1 };
 	output.fd = fopen(output_filename, "w");
 	if (output.fd) {
 		/* generate a json file for output */

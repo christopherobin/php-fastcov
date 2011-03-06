@@ -1,3 +1,5 @@
+ARG_ENABLE('fastcov', 'Whether to enable Fastcov support', 'no');
+
 if (PHP_FASTCOV != "no") {
 	EXTENSION("fastcov", "fastcov.c");
 }
