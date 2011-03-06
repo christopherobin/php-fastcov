@@ -174,7 +174,7 @@ void fc_check_context(char *filename TSRMLS_DC) {
 /* }}} */
 
 /* {{{ fc_ticks_function() */
-void fc_ticks_function() {
+void fc_ticks_function(int tick_count) {
 	uint line;
 	TSRMLS_FETCH();
 
