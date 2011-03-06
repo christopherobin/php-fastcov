@@ -78,7 +78,8 @@ ZEND_GET_MODULE(fastcov);
 
 /* {{{ prototypes */ 
 fastcov_coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC);
-int fc_free_allocated_lines(void *item);
+int fc_free_allocated_data(void *item TSRMLS_DC);
+int fc_build_array_element(void *item, void *return_value_ptr TSRMLS_DC);
 void fc_ticks_function();
 void fc_check_context(char *filename TSRMLS_DC);
 int fc_start(TSRMLS_D);
@@ -111,10 +112,11 @@ fastcov_coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC) {
 }
 /* }}} */
 
-/* {{{ fc_free_allocated_lines() */
-int fc_free_allocated_lines(void *item) {
+/* {{{ fc_free_allocated_data() */
+int fc_free_allocated_data(void *item TSRMLS_DC) {
 	fastcov_coverage_file *file = (fastcov_coverage_file*)item;
 
+	efree(file->filename);
 	if (file->allocated == 1) {
 		efree(file->lines);
 	}
@@ -124,7 +126,7 @@ int fc_free_allocated_lines(void *item) {
 /* }}} */
 
 /* {{{ fc_build_array_element() */
-int fc_build_array_element(void *item, void *return_value_ptr) {
+int fc_build_array_element(void *item, void *return_value_ptr TSRMLS_DC) {
 	zval *file_coverage;
 	zval *return_value = (zval*)return_value_ptr;
 	fastcov_coverage_file *file = (fastcov_coverage_file*)item;
@@ -161,7 +163,7 @@ void fc_check_context(char *filename TSRMLS_DC) {
 		if (zend_hash_find(&FASTCOV_G(covered_files), filename, strlen(filename), (void**)&file) == SUCCESS) {
 			FASTCOV_G(current_file) = file;
 		} else {
-			FASTCOV_G(current_file) = fc_register_file(EG(active_op_array));
+			FASTCOV_G(current_file) = fc_register_file(EG(active_op_array) TSRMLS_CC);
 		}
 		/* then store pointer to current file */
 		FASTCOV_G(current_filename_ptr) = filename_ptr;
@@ -234,7 +236,7 @@ void fc_clean(zend_bool force_output TSRMLS_DC) {
 	}
 
 	/* free any used memory */
-	zend_hash_apply(&FASTCOV_G(covered_files), fc_free_allocated_lines);
+	zend_hash_apply(&FASTCOV_G(covered_files), fc_free_allocated_data TSRMLS_CC);
 
 	/* destroy hash */
 	zend_hash_destroy(&FASTCOV_G(covered_files));
@@ -321,7 +323,7 @@ void fc_output(TSRMLS_D) {
 		/* generate a json file for output */
 		fputc('{', output.fd);
 		/* apply function for writing */
-		zend_hash_apply_with_argument(&FASTCOV_G(covered_files), fc_print_file, (void*)&output);
+		zend_hash_apply_with_argument(&FASTCOV_G(covered_files), fc_print_file, (void*)&output TSRMLS_CC);
 		/* then close the whole json block */
 		fputc('}', output.fd);
 		fclose(output.fd);
@@ -365,12 +367,16 @@ PHP_FUNCTION(fastcov_stop) {
 		RETURN_FALSE;
 	}
 
+	if (FASTCOV_G(running) == 0) {
+		RETURN_FALSE;
+	}
+
 	if (no_return == 0) {
 		/* initialise return array */
 		array_init(return_value);
 
 		/* build our array */
-		zend_hash_apply_with_argument(&FASTCOV_G(covered_files), fc_build_array_element, (void*)return_value);
+		zend_hash_apply_with_argument(&FASTCOV_G(covered_files), fc_build_array_element, (void*)return_value TSRMLS_CC);
 	}
 
 	/* stop covering */
