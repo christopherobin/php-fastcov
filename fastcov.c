@@ -15,7 +15,7 @@
 #include "ext/standard/md5.h"
 #include "php_fastcov.h"
 
-#define FASTCOV_VERSION "0.5"
+#define FASTCOV_VERSION "0.9.0"
 
 /* {{{ fastcov_functions[]
  */

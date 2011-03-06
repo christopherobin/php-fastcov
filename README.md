@@ -1,5 +1,5 @@
-php-fastcov 0.5
-===============
+php-fastcov 0.9.0
+=================
 
 This extension provides precise code coverage on PHP applications with as little overhead as possible ( 5% to 10% ).
 
