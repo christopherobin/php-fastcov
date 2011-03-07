@@ -304,10 +304,8 @@ void fc_init(TSRMLS_D) {
  *       a large PHP array for it */
 /* {{{ fc_print_file() */
 int fc_print_file(void *item, void *arg TSRMLS_DC) {
-	int pos, len;
 	fastcov_output *output = (fastcov_output*)arg;
 	fastcov_coverage_file *file = (fastcov_coverage_file*)item;
-	char c;
 	zval temp;
 	smart_str buf = {0};
 
