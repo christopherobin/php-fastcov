@@ -26,6 +26,7 @@
 #include "ext/standard/info.h"
 #include "ext/standard/md5.h"
 #include "ext/standard/php_lcg.h"
+#include "ext/json/php_json.h"
 #include "php_fastcov.h"
 #ifdef ZEND_WIN32
 #include "zend_config.w32.h"
@@ -45,12 +46,21 @@ zend_function_entry fastcov_functions[] = {
 
 ZEND_DECLARE_MODULE_GLOBALS(fastcov);
 
+/* {{{ fastcov_deps[] */
+#if ZEND_MODULE_API_NO >= 20050922
+static const zend_module_dep fastcov_deps[] = {
+	ZEND_MOD_REQUIRED("json")
+	{NULL, NULL, NULL}
+};
+#endif
+/* }}} */
+
 /* {{{ fastcov_module_entry
  */
 zend_module_entry fastcov_module_entry = {
-#if ZEND_MODULE_API_NO >= 20010901
-	STANDARD_MODULE_HEADER,
-#endif
+	STANDARD_MODULE_HEADER_EX,
+	NULL,
+	fastcov_deps,
 	"fastcov",                        /* Name of the extension */
 	fastcov_functions,                /* List of functions exposed */
 	PHP_MINIT(fastcov),               /* Module init callback */
@@ -58,9 +68,7 @@ zend_module_entry fastcov_module_entry = {
 	PHP_RINIT(fastcov),               /* Request init callback */
 	PHP_RSHUTDOWN(fastcov),           /* Request shutdown callback */
 	PHP_MINFO(fastcov),               /* Module info callback */
-#if ZEND_MODULE_API_NO >= 20010901
 	FASTCOV_VERSION,
-#endif
 	STANDARD_MODULE_PROPERTIES
 };
 /* }}} */
@@ -300,49 +308,21 @@ int fc_print_file(void *item, void *arg TSRMLS_DC) {
 	fastcov_output *output = (fastcov_output*)arg;
 	fastcov_coverage_file *file = (fastcov_coverage_file*)item;
 	char c;
+	zval temp;
+	smart_str buf = {0};
 
 	/* add a comma after each file */
 	if (!output->first_file) {
 		fputc(',', output->fd);
 	}
+	/* store the filename in our temp zval */
+	ZVAL_STRING(&temp, file->filename, 0);
+	php_json_encode(&buf, &temp, 0 TSRMLS_CC);
 	/* output the file name */
-	len = strlen(file->filename);
-	fputc('"', output->fd);
-	/* write the filename char by char */
-	for (pos = 0; pos < len; pos++) {
-		c = file->filename[pos];
-		/* escape most json special characters: http://www.json.org */
-		switch (c) {
-			case '"':
-				fputs("\\\"", output->fd);
-				break;
-			case '\\':
-				fputs("\\\\", output->fd);
-				break;
-			case '/':
-				fputs("\\/", output->fd);
-				break;
-			case '\b':
-				fputs("\\b", output->fd);
-				break;
-			case '\f':
-				fputs("\\f", output->fd);
-				break;
-			case '\n':
-				fputs("\\n", output->fd);
-				break;
-			case '\r':
-				fputs("\\r", output->fd);
-				break;
-			case '\t':
-				fputs("\\t", output->fd);
-				break;
-			default:
-				fputc(c, output->fd);
-				break;
-		}
-	}
-	fputs("\":{", output->fd);
+	fwrite(buf.c, sizeof(char), buf.len, output->fd);
+	fputs(":{", output->fd);
+	/* free our buf */
+	smart_str_free(&buf);
 
 	/* print lines */
 	if (file->allocated == 1) {
