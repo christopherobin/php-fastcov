@@ -292,16 +292,57 @@ void fc_init(TSRMLS_D) {
 }
 /* }}} */
 
-
+/* TODO: find a way to use the json extension from PHP without allocating
+ *       a large PHP array for it */
+/* {{{ fc_print_file() */
 int fc_print_file(void *item, void *arg TSRMLS_DC) {
+	int pos, len;
 	fastcov_output *output = (fastcov_output*)arg;
 	fastcov_coverage_file *file = (fastcov_coverage_file*)item;
+	char c;
 
-	/* print file names */
+	/* add a comma after each file */
 	if (!output->first_file) {
 		fputc(',', output->fd);
 	}
-	fprintf(output->fd, "\"%s\":{", file->filename);
+	/* output the file name */
+	len = strlen(file->filename);
+	fputc('"', output->fd);
+	/* write the filename char by char */
+	for (pos = 0; pos < len; pos++) {
+		c = file->filename[pos];
+		/* escape most json special characters: http://www.json.org */
+		switch (c) {
+			case '"':
+				fputs("\\\"", output->fd);
+				break;
+			case '\\':
+				fputs("\\\\", output->fd);
+				break;
+			case '/':
+				fputs("\\/", output->fd);
+				break;
+			case '\b':
+				fputs("\\b", output->fd);
+				break;
+			case '\f':
+				fputs("\\f", output->fd);
+				break;
+			case '\n':
+				fputs("\\n", output->fd);
+				break;
+			case '\r':
+				fputs("\\r", output->fd);
+				break;
+			case '\t':
+				fputs("\\t", output->fd);
+				break;
+			default:
+				fputc(c, output->fd);
+				break;
+		}
+	}
+	fputs("\":{", output->fd);
 
 	/* print lines */
 	if (file->allocated == 1) {
@@ -323,6 +364,7 @@ int fc_print_file(void *item, void *arg TSRMLS_DC) {
 
 	return ZEND_HASH_APPLY_KEEP;
 }
+/* }}} */
 
 /* {{{ fc_output() */
 void fc_output(TSRMLS_D) {

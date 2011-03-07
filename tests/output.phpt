@@ -31,8 +31,9 @@ $file = array_shift($files);
 
 $coverage = file_get_contents($file);
 unlink($file);
+$odir = addcslashes($odir . DIRECTORY_SEPARATOR, '"/\\');
 var_dump(str_replace($odir, '', $coverage));
 --EXPECT--
 foo
 foo
-string(49) "{"/output.php":{"5":1,"8":2,"9":1,"11":1,"12":1}}"
+string(48) "{"output.php":{"5":1,"8":2,"9":1,"11":1,"12":1}}"
