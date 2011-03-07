@@ -27,7 +27,9 @@
 #include "ext/standard/md5.h"
 #include "ext/standard/php_lcg.h"
 #include "php_fastcov.h"
+#ifdef ZEND_WIN32
 #include "zend_config.w32.h"
+#endif
 
 #define FASTCOV_VERSION "0.9.0"
 
@@ -310,7 +312,7 @@ int fc_print_file(void *item, void *arg TSRMLS_DC) {
 				if (!first_line) {
 					fputc(',', output->fd);
 				}
-				fprintf(output->fd, "\"%d\":%d", line, file->lines[line]);
+				fprintf(output->fd, "\"%d\":%ld", line, file->lines[line]);
 				first_line = 0;
 			}
 		}
