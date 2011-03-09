@@ -42,6 +42,7 @@ ZEND_BEGIN_MODULE_GLOBALS(fastcov)
 	fastcov_coverage_file *current_file;
 	HashTable covered_files;
 	intptr_t current_filename_ptr;
+	unsigned int last_line;
 	/* whether code coverage is running or not */
 	int running;
 	/* output directory */

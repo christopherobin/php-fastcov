@@ -105,7 +105,7 @@ fastcov_coverage_file *fc_register_file(zend_op_array *op_array TSRMLS_DC);
 int fc_free_allocated_data(void *item TSRMLS_DC);
 int fc_build_array_element(void *item, void *return_value_ptr TSRMLS_DC);
 void fc_ticks_function();
-void fc_check_context(char *filename TSRMLS_DC);
+int fc_check_context(char *filename TSRMLS_DC);
 int fc_start(TSRMLS_D);
 void fc_clean(zend_bool TSRMLS_DC);
 void fc_init(TSRMLS_D);
@@ -178,7 +178,7 @@ int fc_build_array_element(void *item, void *return_value_ptr TSRMLS_DC) {
 /* }}} */
 
 /* {{{ fc_check_context() */
-void fc_check_context(char *filename TSRMLS_DC) {
+int fc_check_context(char *filename TSRMLS_DC) {
 	intptr_t filename_ptr = (intptr_t)filename;
 	/* if the current opcode is on a different file than our current_filename_ptr pointer, switch to it.
 	/* we don't use strcmp there in high_compatibility as it would reduce performances on large section of
@@ -192,24 +192,27 @@ void fc_check_context(char *filename TSRMLS_DC) {
 		}
 		/* then store pointer to current file */
 		FASTCOV_G(current_filename_ptr) = filename_ptr;
+		return 1;
 	}
+	return 0;
 }
 /* }}} */
 
-/* {{{ fc_ticks_function() */
-void fc_ticks_function(int tick_count) {
+/* {{{ fc_count_line() */
+void fc_count_line(TSRMLS_D) {
 	uint line;
-	TSRMLS_FETCH();
-
-	/* ignore the ticks if we are not running the coverage ( shoudln't happens ) */
-	if (FASTCOV_G(running) == 0) {
-		return;
-	}
-
-	fc_check_context(zend_get_executed_filename(TSRMLS_C) TSRMLS_CC);
 
 	/* retrieve the current opcode's filename and lineno */
 	line = zend_get_executed_lineno(TSRMLS_C);
+
+	if (!fc_check_context(zend_get_executed_filename(TSRMLS_C) TSRMLS_CC)) {
+		if (line == FASTCOV_G(last_line)) {
+			return;
+		}
+	}
+
+	/* cache the line being counted */
+	FASTCOV_G(last_line) = line;
 
 	if (FASTCOV_G(current_file) != NULL) {
 		fastcov_coverage_file *current_file = FASTCOV_G(current_file);
@@ -244,8 +247,34 @@ void fc_ticks_function(int tick_count) {
 			memset(current_file->lines + previous_count + 1, 0, sizeof(long) * diff);
 		}
 		/* increment line counter */
-		current_file->lines[line]++;
+		if (current_file->lines[line] == 0) {
+			current_file->lines[line] = 1;
+		}
 	}
+}
+/* }}} */
+
+/* {{{ fc_ticks_function() */
+void fc_ticks_function(int tick_count) {
+	TSRMLS_FETCH();
+
+	/* ignore the ticks if we are not running the coverage ( shoudln't happens ) */
+	if (FASTCOV_G(running) == 0) {
+		return;
+	}
+
+	fc_count_line(TSRMLS_C);
+}
+/* }}} */
+
+/* A custom opcode for catching all those pesky jumping
+ * opcodes that may prevents our ticks from being called */
+/* {{{ fc_user_opcode() */
+static int fc_user_opcode(ZEND_OPCODE_HANDLER_ARGS) {
+	if (FASTCOV_G(running) == 1) {
+		fc_count_line(TSRMLS_C);
+	}
+	return ZEND_USER_OPCODE_DISPATCH;
 }
 /* }}} */
 
@@ -293,10 +322,37 @@ void fc_clean(zend_bool force_output TSRMLS_DC) {
 
 /* {{{ fc_init() */
 void fc_init(TSRMLS_D) {
+	unsigned int i;
 	/* setup global variables */
 	FASTCOV_G(running) = 0;
 
 	FASTCOV_G(current_filename_ptr) = 0;
+	FASTCOV_G(last_line) = 0;
+
+	/* overrided opcodes */
+	zend_uchar opcodes[] = {
+			ZEND_JMP,
+			ZEND_JMPZ,
+			ZEND_JMPNZ,
+			ZEND_JMPZNZ,
+			ZEND_JMPZ_EX,
+			ZEND_JMPNZ_EX,
+			ZEND_CATCH,
+			ZEND_RETURN,
+			ZEND_HANDLE_EXCEPTION,
+			ZEND_BRK,
+			ZEND_CONT,
+			ZEND_INIT_FCALL_BY_NAME,
+			ZEND_DO_FCALL,
+			ZEND_DO_FCALL_BY_NAME,
+			ZEND_GOTO,
+			ZEND_THROW,
+			ZEND_EXIT
+	};
+
+	for (i = 0; i < sizeof(opcodes); i++) {
+		zend_set_user_opcode_handler(opcodes[i], fc_user_opcode);
+	}
 }
 /* }}} */
 
@@ -464,8 +520,9 @@ PHP_MSHUTDOWN_FUNCTION(fastcov) {
 
 /* {{{ PHP_RINIT_FUNCTION */
 PHP_RINIT_FUNCTION(fastcov) {
-	/* we need to setup ticks very soon in the script */
 	zval ticks;
+
+	/* we need to setup ticks very soon in the script */
 	ZVAL_LONG(&ticks, 1);
 	CG(declarables).ticks = ticks;
 

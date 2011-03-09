@@ -38,23 +38,56 @@ Basic code coverage can be done using the following lines:
     02. 
     03. fastcov_start();
     04. 
-    05. function do_something() {
-    06.    echo "foo";
-    07. }
-    08. 
-    09. do_something();
-    10. do_something();
-    11. 
-    12. $coverage = fastcov_stop();
+    05. /* this is a sample file that show how fastcov
+    06.  * does it's code coverage */
+    07. 
+    08. function addtwo($arg1) {
+    09.     if (is_numeric($arg1)) {
+    10.         return $arg1 + 2;
+    11.     }
+    12.     return false;
+    13.     return 'dead code';
+    14. }
+    15. 
+    16. /* setup some variables */
+    17. $var2 = 'test';
+    18. 
+    19. // then call our functions
+    20. var_dump(addtwo(7));
+    21. var_dump(
+    22.     addtwo($var2));
+    23. 
+    24. if (false) {
+    25.     var_dump(addtwo(17));
+    26. }
+    27. 
+    28. var_dump(fastcov_stop());
 
-Based on this sample, `$coverage` will contains the following array:
+Based on this sample, `$coverage` will contains the following array,
+it only sets to "1" lines that are executed at least once during the script execution:
 
-    array(
-        "/path/to/myfile.php" => array(
-            03 => 1
-            06 => 2,
-            07 => 1,
-            09 => 1,
-            10 => 1
-        )
-    );
+    array(1) {
+      ["/var/www/fastcov/coverage.php"]=>
+      array(10) {
+        [3]=>
+        int(1)
+        [9]=>
+        int(1)
+        [10]=>
+        int(1)
+        [12]=>
+        int(1)
+        [14]=>
+        int(1)
+        [17]=>
+        int(1)
+        [20]=>
+        int(1)
+        [22]=>
+        int(1)
+        [24]=>
+        int(1)
+        [28]=>
+        int(1)
+      }
+    }
